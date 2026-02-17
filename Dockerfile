@@ -66,7 +66,7 @@ COPY --from=builder /usr/bin/google-maps-scraper /usr/bin/
 
 # Install FastAPI dependencies
 COPY requirements.txt /app/requirements.txt
-RUN pip3 install --no-cache-dir -r /app/requirements.txt
+RUN pip3 install --no-cache-dir --break-system-packages -r /app/requirements.txt
 
 # Copy the FastAPI app
 COPY api.py /app/api.py
