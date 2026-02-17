@@ -51,6 +51,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 \
     libcairo2 \
     libasound2 \
+    python3 \
+    python3-pip \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -62,4 +64,16 @@ RUN chmod -R 755 /opt/browsers \
 
 COPY --from=builder /usr/bin/google-maps-scraper /usr/bin/
 
-ENTRYPOINT ["google-maps-scraper"]
+# Install FastAPI dependencies
+COPY requirements.txt /app/requirements.txt
+RUN pip3 install --no-cache-dir -r /app/requirements.txt
+
+# Copy the FastAPI app
+COPY api.py /app/api.py
+WORKDIR /app
+
+EXPOSE 8000
+
+# Default: run the FastAPI server
+# Override with: docker run <image> google-maps-scraper [flags] for CLI usage
+CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
