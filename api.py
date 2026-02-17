@@ -40,6 +40,14 @@ async def wait_for_scraper(timeout: float = 30.0):
             backoff = min(backoff * 2, 3.0)
     raise RuntimeError("Scraper did not become ready in time")
 
+async def log_scraper_output(proc: subprocess.Popen):
+    """Log scraper's stdout for debugging"""
+    for _ in range(20):  # Log first 20 lines
+        if proc.stdout:
+            line = proc.stdout.readline()
+            if line:
+                logger.info(f"[SCRAPER] {line.decode().strip()}")
+        await asyncio.sleep(0.5)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -55,8 +63,10 @@ async def lifespan(app: FastAPI):
     scraper_process = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stderr=subprocess.STDOUT,  # Merge stderr into stdout
     )
+    # Log the first few lines to see if it's starting
+    asyncio.create_task(log_scraper_output(scraper_process))
     try:
         await wait_for_scraper()
     except RuntimeError:
