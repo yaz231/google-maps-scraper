@@ -12,7 +12,16 @@ import httpx
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger("api")
+import sys
+
+class Logger:
+    def info(self, msg, *args):
+        print(f"[INFO] {msg % args if args else msg}", file=sys.stderr, flush=True)
+    
+    def error(self, msg, *args):
+        print(f"[ERROR] {msg % args if args else msg}", file=sys.stderr, flush=True)
+
+logger = Logger()
 
 SCRAPER_BINARY = os.getenv("SCRAPER_BINARY", "google-maps-scraper")
 SCRAPER_ADDR = os.getenv("SCRAPER_ADDR", "http://localhost:8080")
