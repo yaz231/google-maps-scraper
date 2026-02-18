@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import subprocess
+import traceback
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -17,9 +18,12 @@ import sys
 class Logger:
     def info(self, msg, *args):
         print(f"[INFO] {msg % args if args else msg}", file=sys.stderr, flush=True)
-    
+
     def error(self, msg, *args):
         print(f"[ERROR] {msg % args if args else msg}", file=sys.stderr, flush=True)
+
+    def debug(self, msg, *args):
+        print(f"[DEBUG] {msg % args if args else msg}", file=sys.stderr, flush=True)
 
 logger = Logger()
 
@@ -183,6 +187,9 @@ def health():
 
 @app.post("/scrape", response_model=ScrapeResponse)
 async def scrape(req: ScrapeRequest):
+    logger.info("=== /scrape request received ===")
+    logger.info("  city=%s, lat=%s, lng=%s, query=%s", req.city, req.latitude, req.longitude, req.query)
+
     search_query = f"{req.query} near {req.city}"
 
     job_payload = {
@@ -198,80 +205,122 @@ async def scrape(req: ScrapeRequest):
         "max_time": 300,
     }
 
+    logger.info("Job payload: %s", json.dumps(job_payload))
+
     async with httpx.AsyncClient(timeout=30.0) as client:
         # Create the job
+        logger.info("Creating job at %s/api/v1/jobs ...", SCRAPER_ADDR)
         try:
             resp = await client.post(
                 f"{SCRAPER_ADDR}/api/v1/jobs",
                 json=job_payload,
             )
-        except httpx.ConnectError:
+        except httpx.ConnectError as e:
+            logger.error("ConnectError creating job: %s", e)
+            logger.error("Traceback: %s", traceback.format_exc())
             raise HTTPException(status_code=503, detail="Scraper service unavailable")
+        except Exception as e:
+            logger.error("Unexpected error creating job: %s", e)
+            logger.error("Traceback: %s", traceback.format_exc())
+            raise HTTPException(status_code=500, detail=f"Unexpected error: {e}")
+
+        logger.info("Job creation response: status=%s, body=%s", resp.status_code, resp.text)
 
         if resp.status_code != 201:
+            logger.error("Scraper rejected job: status=%s, body=%s", resp.status_code, resp.text)
             raise HTTPException(
                 status_code=502,
                 detail=f"Scraper rejected job: {resp.text}",
             )
 
         job_id = resp.json()["id"]
+        logger.info("Job created with ID: %s", job_id)
 
         # Poll until finished
         elapsed = 0
+        poll_count = 0
         while elapsed < POLL_TIMEOUT:
             await asyncio.sleep(POLL_INTERVAL)
             elapsed += POLL_INTERVAL
+            poll_count += 1
+
+            logger.debug("Polling job %s (attempt %d, elapsed %ds/%ds) ...", job_id, poll_count, elapsed, POLL_TIMEOUT)
 
             try:
                 status_resp = await client.get(
                     f"{SCRAPER_ADDR}/api/v1/jobs/{job_id}",
                 )
-            except httpx.ConnectError:
+            except httpx.ConnectError as e:
+                logger.error("ConnectError polling job %s: %s", job_id, e)
+                logger.error("Traceback: %s", traceback.format_exc())
                 raise HTTPException(
                     status_code=503,
                     detail="Scraper service unavailable during polling",
                 )
+            except Exception as e:
+                logger.error("Unexpected error polling job %s: %s", job_id, e)
+                logger.error("Traceback: %s", traceback.format_exc())
+                raise HTTPException(status_code=500, detail=f"Unexpected error polling: {e}")
 
             if status_resp.status_code != 200:
+                logger.info("Polling job %s: non-200 status=%s, body=%s", job_id, status_resp.status_code, status_resp.text)
                 continue
 
             job_data = status_resp.json()
             status = job_data.get("Status", job_data.get("status", ""))
-            logger.info(f"Job {job_id} status: {status}, full data: {job_data}")
+            logger.info("Polling job %s: status=%s", job_id, status)
+            logger.debug("Polling job %s: full data=%s", job_id, job_data)
 
             if status == "ok":
+                logger.info("Job %s completed successfully", job_id)
                 break
             elif status == "failed":
+                logger.error("Job %s failed. Full data: %s", job_id, job_data)
                 raise HTTPException(
                     status_code=500,
                     detail="Scraper job failed",
                 )
         else:
+            logger.error("Job %s timed out after %ds (%d polls)", job_id, POLL_TIMEOUT, poll_count)
             raise HTTPException(
                 status_code=504,
                 detail=f"Scraper job timed out after {POLL_TIMEOUT}s",
             )
 
         # Download CSV results
+        logger.info("Downloading CSV for job %s ...", job_id)
         try:
             dl_resp = await client.get(
                 f"{SCRAPER_ADDR}/api/v1/jobs/{job_id}/download",
             )
-        except httpx.ConnectError:
+        except httpx.ConnectError as e:
+            logger.error("ConnectError downloading job %s: %s", job_id, e)
+            logger.error("Traceback: %s", traceback.format_exc())
             raise HTTPException(
                 status_code=503,
                 detail="Scraper service unavailable during download",
             )
+        except Exception as e:
+            logger.error("Unexpected error downloading job %s: %s", job_id, e)
+            logger.error("Traceback: %s", traceback.format_exc())
+            raise HTTPException(status_code=500, detail=f"Unexpected error downloading: {e}")
+
+        logger.info("Download response: status=%s, bytes=%d", dl_resp.status_code, len(dl_resp.text))
 
         if dl_resp.status_code != 200:
+            logger.error("Failed to download results for job %s: status=%s, body=%s", job_id, dl_resp.status_code, dl_resp.text)
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to download results: {dl_resp.text}",
             )
 
+        logger.debug("CSV preview (first 500 chars): %s", dl_resp.text[:500])
+
         shops = parse_csv_to_shops(dl_resp.text)
+        logger.info("Parsed %d shops from CSV", len(shops))
 
         # Cap at 50
         shops = shops[:50]
 
+        logger.info("=== /scrape returning %d shops ===", len(shops))
         return ScrapeResponse(success=True, count=len(shops), shops=shops)
