@@ -237,6 +237,7 @@ async def scrape(req: ScrapeRequest):
 
             job_data = status_resp.json()
             status = job_data.get("Status", job_data.get("status", ""))
+            logger.info(f"Job {job_id} status: {status}, full data: {job_data}")
 
             if status == "ok":
                 break
