@@ -72,8 +72,8 @@ RUN pip3 install --no-cache-dir --break-system-packages -r /app/requirements.txt
 COPY api.py /app/api.py
 WORKDIR /app
 
-EXPOSE 8000
+# Expose the scraper's web UI port
+EXPOSE 8080
 
-# Default: run the FastAPI server
-# Override with: docker run <image> google-maps-scraper [flags] for CLI usage
-CMD ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run the scraper in web mode
+CMD ["google-maps-scraper", "-web", "-data-folder", "/gmapsdata", "-addr", ":8080"]
