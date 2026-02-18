@@ -75,5 +75,5 @@ WORKDIR /app
 # Expose the scraper's web UI port
 EXPOSE 8080
 
-# Run the scraper in web mode
+# Run the scraper in web mode. 
 CMD ["google-maps-scraper", "-web", "-data-folder", "/gmapsdata", "-addr", ":8080"]
