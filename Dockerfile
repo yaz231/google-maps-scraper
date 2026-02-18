@@ -1,7 +1,6 @@
 # Build stage for Playwright dependencies
 FROM ubuntu:20.04 AS playwright-deps
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/browsers
-#ENV PLAYWRIGHT_DRIVER_PATH=/opt/
 RUN export PATH=$PATH:/usr/local/go/bin:/root/go/bin \
     && apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl wget \
@@ -29,7 +28,7 @@ FROM debian:trixie-slim
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/browsers
 ENV PLAYWRIGHT_DRIVER_PATH=/opt
 
-# Install only the necessary dependencies in a single layer
+# Install only the necessary dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     libnss3 \
@@ -51,29 +50,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpango-1.0-0 \
     libcairo2 \
     libasound2 \
-    python3 \
-    python3-pip \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=playwright-deps /opt/browsers /opt/browsers
 COPY --from=playwright-deps /root/.cache/ms-playwright-go /opt/ms-playwright-go
-
 RUN chmod -R 755 /opt/browsers \
     && chmod -R 755 /opt/ms-playwright-go
 
 COPY --from=builder /usr/bin/google-maps-scraper /usr/bin/
 
-# Install FastAPI dependencies
-COPY requirements.txt /app/requirements.txt
-RUN pip3 install --no-cache-dir --break-system-packages -r /app/requirements.txt
-
-# Copy the FastAPI app
-COPY api.py /app/api.py
-WORKDIR /app
+WORKDIR /gmapsdata
 
 # Expose the scraper's web UI port
 EXPOSE 8080
 
-# Run the scraper in web mode. 
+# Run the scraper in web mode
 CMD ["google-maps-scraper", "-web", "-data-folder", "/gmapsdata", "-addr", ":8080"]
